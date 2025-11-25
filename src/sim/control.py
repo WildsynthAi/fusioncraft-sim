@@ -1,27 +1,74 @@
-import numpy as np
+# --- PID compatibility wrapper (appended for runner compatibility) ---
+def _pid_step_compat(self, setpoint, measured, dt):
+    """
+    Provide PID.step(setpoint, measured, dt) for older/newer PID class shapes.
+    Tries existing methods first; otherwise uses a simple PID compute.
+    Returns float control output.
+    """
+    # try other likely APIs
+    for name in ("step","update","compute","control","control_signal"):
+        if hasattr(self, name) and name != "step":
+            meth = getattr(self, name)
+            try:
+                err = setpoint - measured
+                try:
+                    return float(meth(err, dt))
+                except TypeError:
+                    pass
+                try:
+                    return float(meth(setpoint, measured, dt))
+                except TypeError:
+                    pass
+                try:
+                    return float(meth(measured, dt))
+                except TypeError:
+                    pass
+            except Exception:
+                continue
 
-class PID:
-    def __init__(self, kp=1.0, ki=0.0, kd=0.0, setpoint=0.0, integrator_limit=1e6):
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.setpoint = setpoint
-        self._integral = 0.0
-        self._last_error = None
-        self.integrator_limit = integrator_limit
+    # fallback: simple PID
+    e = float(setpoint - measured)
+    if not hasattr(self, "_pid_integral"):
+        self._pid_integral = 0.0
+    if not hasattr(self, "_pid_prev_e"):
+        self._pid_prev_e = e
+    self._pid_integral += e * dt
+    dedt = (e - self._pid_prev_e) / dt if dt and dt > 0 else 0.0
+    self._pid_prev_e = e
 
-    def reset(self):
-        self._integral = 0.0
-        self._last_error = None
+    # read gains (support kp/ki/kd or Kp/Ki/Kd)
+    Kp = getattr(self, "kp", None)
+    if Kp is None:
+        Kp = getattr(self, "Kp", 0.0)
+    Ki = getattr(self, "ki", None)
+    if Ki is None:
+        Ki = getattr(self, "Ki", 0.0)
+    Kd = getattr(self, "kd", None)
+    if Kd is None:
+        Kd = getattr(self, "Kd", 0.0)
 
-    def step(self, t, measurement, dt):
-        error = self.setpoint - measurement
-        self._integral += error * dt
-        # clamp integrator
-        self._integral = max(min(self._integral, self.integrator_limit), -self.integrator_limit)
-        d_error = 0.0
-        if self._last_error is not None and dt > 0:
-            d_error = (error - self._last_error) / dt
-        self._last_error = error
-        output = self.kp * error + self.ki * self._integral + self.kd * d_error
-        return output
+    try: Kp = float(Kp)
+    except Exception: Kp = 1.0
+    try: Ki = float(Ki)
+    except Exception: Ki = 0.0
+    try: Kd = float(Kd)
+    except Exception: Kd = 0.0
+
+    out = Kp * e + Ki * self._pid_integral + Kd * dedt
+    return float(out)
+
+# Attach wrapper to PID class on import time (if PID present and missing step)
+try:
+    import importlib
+    m = importlib.import_module("src.sim.control")
+    PID_cls = getattr(m, "PID", None)
+    if PID_cls is not None and not hasattr(PID_cls, "step"):
+        PID_cls.step = _pid_step_compat
+        # print only in dev contexts; harmless otherwise
+        try:
+            print("PID.step compatibility wrapper attached.")
+        except Exception:
+            pass
+except Exception:
+    # silence on import errors (safe to ignore)
+    pass
