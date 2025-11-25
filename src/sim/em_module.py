@@ -18,7 +18,7 @@ class EMOscillator(Module):
         E, V = state
         driving = inputs.get("em_drive", 0.0) if inputs else 0.0
         dE_dt = V
-        dV_dt = -self.gamma * V - (self.omega**2) * E + driving
+        dV_dt = -self.gamma * V - (self.omega ** 2) * E + driving
         return np.array([dE_dt, dV_dt], dtype=float)
 
     def step(self, dt, inputs=None):
