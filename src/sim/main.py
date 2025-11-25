@@ -1,5 +1,5 @@
 """
-FusionCraft â€“ Deterministic Multi-Physics Simulation Driver
+FusionCraft " Deterministic Multi-Physics Simulation Driver
 Runs:
 - Fusion 0D model (toy energy balance)
 - EM oscillator model
@@ -42,7 +42,7 @@ def run_simulation(total_time: float = 1.0, dt: float = 0.001, progress: bool = 
     # Initialize modules
     fusion = Fusion0D()            # must implement .step(dt) -> (T, n, pf) or similar
     em = EMFieldOscillator()       # must implement .step(dt) -> E
-    pid = PID(kp=0.8, ki=0.2, kd=0.05)
+    pid = PID(kp=5.0, ki=1.0, kd=0.1) # Tuned for more aggressive control
 
     # Time series logs (pre-allocate lists)
     t_series = []
