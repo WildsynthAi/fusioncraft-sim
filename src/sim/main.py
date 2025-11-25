@@ -1,29 +1,50 @@
 """
-FusionCraft – Deterministic Multi-Physics Simulation Driver
+FusionCraft â€“ Deterministic Multi-Physics Simulation Driver
 Runs:
 - Fusion 0D model (toy energy balance)
 - EM oscillator model
 - PID controller
-Uses RK4 integrator and returns simulation data.
+Uses RK4 integrator (if modules provide derivative interfaces) or module.step() methods and returns simulation data.
 """
 
 import numpy as np
+from typing import Dict, Any
 
 from .fusion_module import Fusion0D
 from .em_module import EMFieldOscillator
 from .control import PID
-from .integrator import rk4
+# integrator.rk4 is available in the repo; not strictly required by this driver,
+# but left available for future use.
+from .integrator import rk4  # noqa: F401
 
 
-def run_simulation(total_time=1.0, dt=0.001):
-    steps = int(total_time / dt)
+def run_simulation(total_time: float = 1.0, dt: float = 0.001, progress: bool = False) -> Dict[str, Any]:
+    """
+    Run the deterministic multi-physics demo simulation.
+
+    Args:
+        total_time: total simulated time (seconds)
+        dt: timestep (seconds)
+        progress: if True print simple progress updates
+
+    Returns:
+        dict of numpy arrays: time, temperature, density, fusion_power, E_field, control_signal
+    """
+    if dt <= 0:
+        raise ValueError("dt must be > 0")
+    if total_time <= 0:
+        raise ValueError("total_time must be > 0")
+
+    # build explicit time grid (includes t=0 and t=total_time)
+    time_grid = np.arange(0.0, total_time + dt * 0.5, dt)
+    steps = len(time_grid)
 
     # Initialize modules
-    fusion = Fusion0D()
-    em = EMFieldOscillator()
+    fusion = Fusion0D()            # must implement .step(dt) -> (T, n, pf) or similar
+    em = EMFieldOscillator()       # must implement .step(dt) -> E
     pid = PID(kp=0.8, ki=0.2, kd=0.05)
 
-    # Time series logs
+    # Time series logs (pre-allocate lists)
     t_series = []
     T_series = []
     n_series = []
@@ -32,13 +53,27 @@ def run_simulation(total_time=1.0, dt=0.001):
     control_series = []
 
     # Simulation loop
-    t = 0.0
-    for _ in range(steps):
+    for i, t in enumerate(time_grid):
         # --- Fusion plasma integration ---
-        T, n, pf = fusion.step(dt)
+        # try to call fusion.step(dt) and accept either tuple or single value
+        fusion_out = fusion.step(dt)
+        if isinstance(fusion_out, tuple) and len(fusion_out) >= 3:
+            T, n, pf = fusion_out[0], fusion_out[1], fusion_out[2]
+        else:
+            # some toy modules may return (T,) or single value; be defensive
+            try:
+                T = float(fusion_out)
+            except Exception:
+                raise RuntimeError("fusion.step(dt) returned unexpected result; expected (T,n,pf) or numeric T")
+            n = 0.0
+            pf = 0.0
 
         # --- EM oscillator ---
-        E = em.step(dt)
+        em_out = em.step(dt)
+        try:
+            E = float(em_out)
+        except Exception:
+            raise RuntimeError("em.step(dt) returned unexpected result; expected numeric E value")
 
         # --- Control system ---
         control = pid.step(setpoint=5.0, measured=T, dt=dt)
@@ -51,8 +86,12 @@ def run_simulation(total_time=1.0, dt=0.001):
         E_series.append(E)
         control_series.append(control)
 
-        t += dt
+        # Simple progress printout (every 10%) if requested
+        if progress and (i % max(1, steps // 10) == 0):
+            pct = int((i / max(1, steps - 1)) * 100)
+            print(f"[sim] {pct}%  t={t:.3f}s")
 
+    # convert to numpy arrays and return
     return {
         "time": np.array(t_series),
         "temperature": np.array(T_series),
@@ -64,7 +103,8 @@ def run_simulation(total_time=1.0, dt=0.001):
 
 
 if __name__ == "__main__":
-    results = run_simulation()
+    # quick smoke run when executed directly
+    results = run_simulation(total_time=0.5, dt=0.001, progress=True)
     print("Simulation complete.")
-    print("Final Temperature:", results["temperature"][-1])
-    print("Final Fusion Power:", results["fusion_power"][-1])
+    print("Final Temperature:", float(results["temperature"][-1]))
+    print("Final Fusion Power:", float(results["fusion_power"][-1]))
